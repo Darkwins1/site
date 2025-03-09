@@ -1,0 +1,675 @@
+from datetime import datetime, timedelta
+from time import sleep
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import threading
+import os
+import sqlite3
+import re
+import pywhatkit
+import bcrypt
+from flask_jwt_extended import (
+    JWTManager, create_access_token, create_refresh_token, jwt_required, get_jwt_identity
+)
+
+app = Flask(__name__)
+CORS(app)  # Habilita CORS para todas as rotas
+
+# Configuração do JWT
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'sua_chave_secreta_aqui')  # Use uma chave segura em produção
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=30)  # Access token expira em 30 minutos
+app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=7)  # Refresh token expira em 7 dias
+jwt = JWTManager(app)
+
+# Lista do cardápio (exemplo)
+cardapio = {
+    "hamburgueres": [
+        {
+            "id": 1,
+            "nome": "King Simples",
+            "descricao": "Pão prensadão, molho Rose, 140g de carne moida, molho cheddar, ovo, queijo, alface e tomate.",
+            "valor": 17.00,
+            "tempo_estimado": 10
+        },
+        {
+            "id": 2,
+            "nome": "King Completo",
+            "descricao": "Pão prensadão, molho Rose, 140g de carne moida, molho cheddar, ovo, queijo, alface, calabresa e tomate.",
+            "valor": 20.00,
+            "tempo_estimado": 15
+        },
+        {
+            "id": 3,
+            "nome": "Mega King Simples",
+            "descricao": "Pão prensadão, molho Rose, 140g de carne moida, molho cheddar, ovo, queijo, alface, calabresa, banana e tomate .",
+            "valor": 22.00,
+            "tempo_estimado": 25
+        },
+        {
+            "id": 4,
+            "nome": "Mega King Completo",
+            "descricao": "Pão prensadão, molho Rose, 140g de carne moida, creme cheese, ovo, queijo, alface, calabresa, banana e tomate .",
+            "valor": 25.00,
+            "tempo_estimado": 20
+
+        },
+        {     "id": 5,
+            "nome": "Super king Completo",
+            "descricao": "Pão prensadão, molho Rose, 280g de carne moida, creme cheese, 2xovos, queijo, alface, calabresa, banana e tomate .",
+            "valor": 30.00,
+            "tempo_estimado": 20
+         },
+        {     "id": 6,
+            "nome": "Extra King Simples",
+            "descricao": "Pão prensadão, molho Rose, 400g de carne moida, creme cheese, ovo, queijo, alface, calabresa, banana e tomate .",
+            "valor": 38.00,
+            "tempo_estimado": 20
+         },
+        {     "id": 7,
+            "nome": "Extra King Completo",
+            "descricao": "Pão prensadão, molho Rose, 400g de carne moida, creme cheese, 2xovos, queijo, alface, calabresa, banana e tomate .",
+            "valor": 45.00,
+            "tempo_estimado": 20
+        }
+        
+    ],
+    "refrigerantes": [
+        {
+            "id": 8,
+            "nome": "Coca-Cola",
+            "descricao": "Refrigerante gelado de 350ml.",
+            "valor": 6.00,
+            "tempo_estimado": 5
+        },
+        {
+            "id": 9,
+            "nome": "Guarana Antartica",
+            "descricao": "Refrigerante gelado de 350ml.",
+            "valor": 6.00,
+            "tempo_estimado": 5
+        },
+        {
+            "id": 10,
+            "nome": "Coca-Zero ",
+            "descricao": "Refrigerante gelado de 350ml.",
+            "valor": 6.00,
+            "tempo_estimado": 5
+        },
+        {
+              "id": 11,
+            "nome": "Sprite",
+            "descricao": "Refrigerante gelado de 350ml.",
+            "valor": 6.00,
+            "tempo_estimado": 5
+        },
+        {
+              "id": 12,
+            "nome": "Coca-Cola",
+            "descricao": "Refrigerante gelado de 1L.",
+            "valor": 9.00,
+            "tempo_estimado": 5
+        },
+        {
+              "id": 13,
+            "nome": "Guarana Antartica",
+            "descricao": "Refrigerante gelado de 1L.",
+            "valor": 9.00,
+            "tempo_estimado": 5
+        },
+        {
+              "id": 14,
+            "nome": "Sprite",
+            "descricao": "Refrigerante gelado de 1L.",
+            "valor": 9.00,
+            "tempo_estimado": 5
+        },
+        {
+              "id": 15,
+            "nome": "Coca-Zero",
+            "descricao": "Refrigerante gelado de 1L.",
+            "valor": 9.00,
+            "tempo_estimado": 5
+        },
+        
+    ],
+    "sucos": [ 
+        {       
+            "id": 16,
+            "nome": "Suco de goiaba",
+            "descricao": "Suco natural de goiaba 500ml.",
+            "valor": 9.00,
+            "tempo_estimado": 5
+        },
+        {
+            "id": 17,
+            "nome": "Suco de abacaxi",
+            "descricao": "Suco natural de abacaxi 500ml.",
+            "valor": 9.00,
+            "tempo_estimado": 5
+        },
+        {
+            "id": 18,
+            "nome": "Suco de maracuja",
+            "descricao": "Suco natural de maracuja 500ml.",
+            "valor": 9.00,
+            "tempo_estimado": 5
+        },
+        {
+            "id": 19,
+            "nome": "Suco de morango",
+            "descricao": "Suco natural de morango 500ml.",
+            "valor": 9.00,
+            "tempo_estimado": 5
+        },
+        {
+            "id": 20,
+            "nome": "Suco de mangaba com leite",
+            "descricao": "Suco natural de mangaba com leite 500ml.",
+            "valor": 9.00,
+            "tempo_estimado": 5
+        },
+        {
+            "id": 21,
+            "nome": "Suco de Laranja",
+            "descricao": "Suco natural de laranja 500ml.",
+            "valor": 9.00,
+            "tempo_estimado": 5
+        }
+       
+    ],
+
+    "sobremesas": [
+        {
+            "id": 22,
+            "nome": "Pudim",
+            "descricao": "Pudim de leite condensado caseiro.",
+            "valor": 12.00,
+            "tempo_estimado": 20
+        },
+        {
+            "id": 23,
+            "nome": "Bolo de Chocolate",
+            "descricao": "Bolo de chocolate com cobertura cremosa.",
+            "valor": 15.00,
+            "tempo_estimado": 20
+        },
+        {
+            "id": 24,
+            "nome": "açai",
+            "descricao": "açai 1L, mm's, cobertura de chocolate, leite condensado, leite ninho. ",
+            "valor": 43.99,
+            "tempo_estimado": 20
+        },
+        {
+            "id": 25,
+            "nome": "Torta De abacaxi",
+            "descricao": "Abacaxi, massa amanteigada, pedaços de abacaxi, recheio de mousse de abacaxi, camada de chocolate meio amargo.",
+            "valor": 12.00,
+            "tempo_estimado": 20
+        }
+    ],
+    "acompanhamentos": [
+        {
+            "id": 26,
+            "nome": "Batata Frita",
+            "descricao": "Porção de batata frita (p).",
+            "valor": 8.00,
+            "tempo_estimado": 10
+        },
+        {
+            "id": 27,
+            "nome": "Batata Frita",
+            "descricao": "Porção de batata frita (m).",
+            "valor": 12.00,
+            "tempo_estimado": 10
+        },
+        {
+            "id": 28,
+            "nome": "Batata Frita",
+            "descricao": "Porção de batata frita (g).",
+            "valor": 16.00,
+            "tempo_estimado": 10
+        },
+        {
+            "id": 29,
+            "nome": "Batata Frita",
+            "descricao": "Porção de batata frita (gg).",
+            "valor": 20.00,
+            "tempo_estimado": 12
+        }
+    ],
+    "promocoes": [
+        {
+            "id": 30,
+            "nome": "Combo King Completo",
+            "descricao": "3X king completo + Guarana-Antártica(2L) + batata frita (p).",
+            "valor": 69.99,
+            "tempo_estimado": 25
+
+        },
+        {
+            "id": 31,
+            "nome": "Combo Mega King ",
+            "descricao": "2X King Completo + Guaraná-Antártica(1L) + batata(p).",
+            "valor": 54.99,
+            "tempo_estimado": 25
+        },
+        {
+            "id": 32,
+            "nome": "King Duplo",
+            "descricao": "2X King Completo + Guaraná-Antártica(1L).",
+            "valor": 44.99,
+            "tempo_estimado": 25
+        },
+        {
+            "id": 33,
+            "nome": "Prensadão",
+            "descricao": "1X King completo + coca-cola(350ml) + batata frita(p).",
+            "valor": 31.99,
+            "tempo_estimado": 25
+        }
+    ]
+}
+
+pedidos = []
+historico_pedidos = []
+mesas_ocupadas = set()  # Conjunto para armazenar as mesas ocupadas
+MAX_MESAS = 50  # Número máximo de mesas
+
+thread_running = True
+
+# Função para criar a tabela de usuários no banco de dados
+def criar_tabela():
+    conn = sqlite3.connect('cadastro.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            senha TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# Função para validar o formato do e-mail
+def validar_email(email):
+    regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+    return re.match(regex, email) is not None
+
+# Função para validar a força da senha
+def validar_senha(senha):
+    if len(senha) < 8:
+        return False
+    if not re.search("[a-z]", senha):
+        return False
+    if not re.search("[A-Z]", senha):
+        return False
+    if not re.search("[0-9]", senha):
+        return False
+    return True
+
+# Rota para cadastrar um novo usuário
+@app.route('/cadastro', methods=['POST'])
+def cadastrar_usuario():
+    dados = request.get_json()
+
+    if not dados or 'nome' not in dados or 'email' not in dados or 'senha' not in dados:
+        return jsonify({'mensagem': 'Dados incompletos'}), 400
+
+    nome = dados['nome']
+    email = dados['email']
+    senha = dados['senha']
+
+    # Validação do e-mail
+    if not validar_email(email):
+        return jsonify({'mensagem': 'Formato de e-mail inválido'}), 400
+
+    # Validação da senha
+    if not validar_senha(senha):
+        return jsonify({'mensagem': 'Senha fraca. Use pelo menos 8 caracteres, letras maiúsculas, minúsculas e números.'}), 400
+
+    # Criptografa a senha
+    senha_criptografada = bcrypt.hashpw(senha.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+    conn = sqlite3.connect('cadastro.db')
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('INSERT INTO usuarios (nome, email, senha) VALUES (?, ?, ?)', (nome, email, senha_criptografada))
+        conn.commit()
+        return jsonify({'mensagem': 'Usuário cadastrado com sucesso!'}), 201
+    except sqlite3.IntegrityError:
+        return jsonify({'mensagem': 'E-mail já cadastrado'}), 400
+    finally:
+        conn.close()
+
+# Rota para login (gera access token e refresh token)
+@app.route('/login', methods=['POST'])
+def login():
+    dados = request.get_json()
+
+    if not dados or 'email' not in dados or 'senha' not in dados:
+        return jsonify({'mensagem': 'E-mail e senha são obrigatórios'}), 400
+
+    email = dados['email']
+    senha = dados['senha']
+
+    conn = sqlite3.connect('cadastro.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, nome, email, senha FROM usuarios WHERE email = ?', (email,))
+    usuario = cursor.fetchone()
+    conn.close()
+
+    if usuario and bcrypt.checkpw(senha.encode('utf-8'), usuario[3].encode('utf-8')):
+        # Cria access token e refresh token
+        access_token = create_access_token(identity=usuario[0])
+        refresh_token = create_refresh_token(identity=usuario[0])
+        return jsonify({
+            'access_token': access_token,
+            'refresh_token': refresh_token,
+            'usuario': {
+                'id': usuario[0],
+                'nome': usuario[1],
+                'email': usuario[2]
+            }
+        }), 200
+    else:
+        return jsonify({'mensagem': 'Credenciais inválidas'}), 401
+
+# Rota para renovar o access token usando o refresh token
+@app.route('/refresh', methods=['POST'])
+@jwt_required(refresh=True)  # Exige um refresh token válido
+def refresh():
+    usuario_id = get_jwt_identity()
+    access_token = create_access_token(identity=usuario_id)
+    return jsonify({'access_token': access_token}), 200
+
+# Rota protegida (requer autenticação JWT)
+@app.route('/protegido', methods=['GET'])
+@jwt_required()  # Exige um access token válido
+def protegido():
+    usuario_id = get_jwt_identity()
+    return jsonify({'mensagem': f'Você está autenticado! ID do usuário: {usuario_id}'}), 200
+
+# Rota para listar todos os usuários (protegida com JWT)
+@app.route('/usuarios', methods=['GET'])
+@jwt_required()  # Exige um access token válido
+def listar_usuarios():
+    conn = sqlite3.connect('cadastro.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, nome, email FROM usuarios')
+    usuarios = cursor.fetchall()
+    conn.close()
+
+    # Converte a lista de tuplas em uma lista de dicionários
+    usuarios_json = [{'id': u[0], 'nome': u[1], 'email': u[2]} for u in usuarios]
+    return jsonify({'usuarios': usuarios_json})
+
+# Tratamento de erros global
+@app.errorhandler(Exception)
+def handle_exception(e):
+    return jsonify({"erro": "Ocorreu um erro interno no servidor"}), 500
+
+# Listar todo o cardápio
+@app.route('/cardapio', methods=["GET"])
+def listar_cardapio():
+    return jsonify(cardapio), 200
+
+# Listar uma categoria específica
+@app.route('/cardapio/categoria/<categoria>', methods=["GET"])
+def listar_categoria(categoria):
+    if categoria in cardapio:
+        return jsonify({categoria: cardapio[categoria]}), 200
+    return jsonify({"erro": "Categoria não encontrada"}), 404
+
+# Buscar prato pelo ID
+@app.route('/cardapio/prato/<int:prato_id>', methods=["GET"])
+def buscar_prato(prato_id):
+    for categoria, items in cardapio.items():
+        for prato in items:
+            if prato["id"] == prato_id:
+                return jsonify(prato), 200
+    return jsonify({"erro": "Prato não encontrado"}), 404
+
+# Criar um pedido
+@app.route('/pedido', methods=["POST"])
+def fazer_pedido():
+    data = request.json
+
+    if not data or "mesa" not in data or "itens" not in data:
+        return jsonify({"erro": "Campos obrigatórios: 'mesa' e 'itens'"}), 400
+
+    mesa = data["mesa"]
+
+    # Verifica se a mesa já está ocupada
+    if mesa in mesas_ocupadas:
+        return jsonify({"erro": "Mesa já está ocupada"}), 400
+
+    # Verifica se o número máximo de mesas foi atingido
+    if len(mesas_ocupadas) >= MAX_MESAS:
+        return jsonify({"erro": "Número máximo de mesas atingido"}), 400
+
+    pedido_id = len(pedidos) + 1
+    total = 0
+    itens_processados = []
+    tempo_estimado_pedido = 0
+
+    for item in data["itens"]:
+        prato_id = item.get("id")
+        quantidade = item.get("quantidade", 1)
+
+        if quantidade <= 0:
+            return jsonify({"erro": f"Quantidade inválida para o item com ID {prato_id}"}), 400
+
+        prato_encontrado = None
+        for categoria, itens in cardapio.items():
+            for prato in itens:
+                if prato["id"] == prato_id:
+                    prato_encontrado = prato
+                    break
+            if prato_encontrado:
+                break
+
+        if not prato_encontrado:
+            return jsonify({"erro": f"Prato com ID {prato_id} não encontrado"}), 404
+
+        subtotal = prato_encontrado["valor"] * quantidade
+        total += subtotal
+
+        if prato_encontrado["tempo_estimado"] > tempo_estimado_pedido:
+            tempo_estimado_pedido = prato_encontrado["tempo_estimado"]
+
+        itens_processados.append({
+            "id": prato_encontrado["id"],
+            "nome": prato_encontrado["nome"],
+            "quantidade": quantidade,
+            "valor_unitario": prato_encontrado["valor"],
+            "subtotal": subtotal
+        })
+
+    taxa_servico = total * 0.10
+    total_com_taxa = total + taxa_servico
+
+    pagamento = data.get("pagamento", {})
+    valor_recebido = pagamento.get("valor_recebido", 0)
+    metodo_pagamento = pagamento.get("metodo", "Não informado").lower()
+
+    formas_pagamento_validas = ["dinheiro", "credito", "debito", "pix"]
+    if metodo_pagamento not in formas_pagamento_validas:
+        return jsonify({"erro": "Método de pagamento inválido. Escolha entre: dinheiro, crédito, débito ou pix."}), 400
+
+    if metodo_pagamento == "dinheiro" and valor_recebido < total_com_taxa:
+        return jsonify({"erro": "Valor recebido insuficiente para pagar o pedido."}), 400
+
+    divisao = pagamento.get("divisao", 1)
+    if divisao <= 0:
+        return jsonify({"erro": "A divisão do pagamento deve ser um número positivo."}), 400
+
+    troco = max(0, valor_recebido - total_com_taxa) if metodo_pagamento == "dinheiro" else 0
+    valor_por_pessoa = round(total_com_taxa / divisao, 2) if divisao > 1 else total_com_taxa
+
+    novo_pedido = {
+        "id": pedido_id,
+        "mesa": mesa,
+        "itens": itens_processados,
+        "total_pedido": round(total, 2),
+        "taxa_servico": round(taxa_servico, 2),
+        "total_com_taxa": round(total_com_taxa, 2),
+        "status": "Em preparo",
+        "horario": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "tempo_estimado": tempo_estimado_pedido,
+        "pagamento": {
+            "metodo": metodo_pagamento,
+            "valor_recebido": valor_recebido if metodo_pagamento == "dinheiro" else "Não se aplica",
+            "troco": round(troco, 2),
+            "divisao": divisao,
+            "valor_por_pessoa": valor_por_pessoa
+        }
+    }
+
+    pedidos.append(novo_pedido)
+    mesas_ocupadas.add(mesa)  # Adiciona a mesa à lista de mesas ocupadas
+    return jsonify({"mensagem": "Pedido realizado com sucesso!", "pedido": novo_pedido}), 201
+
+# Listar todos os pedidos
+@app.route('/pedidos', methods=["GET"])
+def listar_pedidos():
+    return jsonify(pedidos), 200
+
+# Buscar pedido por ID
+@app.route('/pedido/<int:pedido_id>', methods=["GET"])
+def buscar_pedido(pedido_id):
+    pedido = next((pedido for pedido in pedidos if pedido["id"] == pedido_id), None)
+    if pedido:
+        return jsonify(pedido), 200
+    return jsonify({"erro": "Pedido não encontrado"}), 404
+
+# Atualizar status do pedido
+@app.route('/pedido/<int:pedido_id>/status', methods=["PUT"])
+def atualizar_status(pedido_id):
+    data = request.json
+    novo_status = data.get("status")
+
+    if not novo_status:
+        return jsonify({"erro": "Campo 'status' é obrigatório"}), 400
+
+    for pedido in pedidos:
+        if pedido["id"] == pedido_id:
+            pedido["status"] = novo_status
+            return jsonify({"mensagem": "Status do pedido atualizado com sucesso!", "pedido": pedido}), 200
+    return jsonify({"erro": "Pedido não encontrado"}), 404
+
+# Entregar pedido
+@app.route('/pedido/<int:pedido_id>/entregar', methods=["PUT"])
+def entregar_pedido(pedido_id):
+    for pedido in pedidos:
+        if pedido["id"] == pedido_id:
+            if pedido["status"] == "Entregue":
+                return jsonify({"erro": "Pedido já foi entregue"}), 400
+            pedido["status"] = "Entregue"
+            historico_pedidos.append(pedido)
+            pedidos.remove(pedido)
+            mesas_ocupadas.remove(pedido["mesa"])  # Remove a mesa da lista de mesas ocupadas
+            return jsonify({"mensagem": "Pedido entregue com sucesso!", "pedido": pedido}), 200
+    return jsonify({"erro": "Pedido não encontrado"}), 404
+
+# Histórico de pedidos
+@app.route('/historico', methods=["GET"])
+def listar_historico():
+    return jsonify(historico_pedidos), 200
+
+# Cancelar pedido
+@app.route('/pedido/<int:pedido_id>/cancelar', methods=["PUT"])
+def cancelar_pedido(pedido_id):
+    for pedido in pedidos:
+        if pedido["id"] == pedido_id:
+            if pedido["status"] == "Cancelado":
+                return jsonify({"erro": "Pedido já está cancelado"}), 400
+            pedido["status"] = "Cancelado"
+            historico_pedidos.append(pedido)
+            pedidos.remove(pedido)
+            mesas_ocupadas.remove(pedido["mesa"])  # Remove a mesa da lista de mesas ocupadas
+            return jsonify({"mensagem": "Pedido cancelado com sucesso!", "pedido": pedido}), 200
+    return jsonify({"erro": "Pedido não encontrado"}), 404
+
+# Excluir pedido
+@app.route('/pedido/<int:pedido_id>', methods=["DELETE"])
+def deletar_pedido(pedido_id):
+    global pedidos
+    pedido_existente = next((pedido for pedido in pedidos if pedido["id"] == pedido_id), None)
+
+    if not pedido_existente:
+        return jsonify({"erro": "Pedido não encontrado"}), 404
+
+    pedidos = [pedido for pedido in pedidos if pedido["id"] != pedido_id]
+    mesas_ocupadas.remove(pedido_existente["mesa"])  # Remove a mesa da lista de mesas ocupadas
+    return jsonify({"mensagem": "Pedido removido com sucesso!"}), 200
+
+# Listar pedidos entregues
+@app.route('/pedidos/entregues', methods=["GET"])
+def listar_pedidos_entregues():
+    pedidos_entregues = [pedido for pedido in pedidos if pedido["status"] == "Entregue"]
+    return jsonify(pedidos_entregues), 200
+
+# Rota para reservar mesa
+@app.route('/reservar-mesa', methods=['POST'])
+@jwt_required()
+def reservar_mesa():
+    data = request.json
+    mesa_id = data.get('mesaId')
+    cliente_nome = data.get('clienteNome')
+
+    if mesa_id in mesas_ocupadas:
+        return jsonify({"erro": "Mesa já está ocupada ou reservada"}), 400
+
+    mesas_ocupadas.add(mesa_id)
+    return jsonify({"mensagem": f"Mesa {mesa_id} reservada para {cliente_nome}"}), 200
+
+# Rota para gerar relatório de vendas
+@app.route('/relatorios', methods=['GET'])
+@jwt_required()
+def relatorios():
+    periodo = request.args.get('periodo', 'diario')  # diario, semanal, mensal
+    relatorio = {
+        "total_vendas": 1000.00,
+        "itens_mais_vendidos": ["Hambúrguer King", "Coca-Cola"],
+        "horario_pico": "12:00 - 14:00"
+    }
+    return jsonify(relatorio), 200
+
+    # Rota para atualizar estoque
+    @app.route('/atualizar-estoque', methods=['POST'])
+    @jwt_required()
+    def atualizar_estoque():
+        data = request.json
+        ingrediente_id = data.get('ingredienteId')
+        quantidade = data.get('quantidade')
+
+    return jsonify({"mensagem": "Estoque atualizado com sucesso!"}), 200
+
+# Atualizar status dos pedidos automaticamente
+def atualizar_status_automaticamente():
+    while thread_running:
+        sleep(3)  # Espera 3 segundos entre cada verificação
+
+        for pedido in pedidos:
+            if pedido["status"] not in ["Pronto para entrega", "Cancelado", "Entregue"]:
+                horario_pedido = datetime.strptime(pedido["horario"], "%Y-%m-%d %H:%M:%S")
+                tempo_decorrido = (datetime.now() - horario_pedido).total_seconds() / 60  # Convertendo segundos para minutos
+                tempo_estimado = pedido.get("tempo_estimado", 30)
+
+                if tempo_decorrido >= tempo_estimado:
+                    pedido["status"] = "Pronto para entrega"
+                elif tempo_decorrido >= tempo_estimado * 0.7:
+                    pedido["status"] = "Quase pronto"
+
+# Criar e iniciar a thread de atualização automática
+thread = threading.Thread(target=atualizar_status_automaticamente, daemon=True)
+thread.start()
+
+# Iniciar o aplicativo
+if __name__ == '__main__':
+    criar_tabela()  # Cria a tabela de usuários no banco de dados
+    app.run(port=8000, host="localhost", debug=True)
